@@ -1,0 +1,35 @@
+/.idea/
+/project/boot/
+/project/plugins/project
+lib_managed/
+src_managed/
+test-output/
+.classpath_nb
+
+*.class
+
+# Exclude OS X folder attributes
+.DS_Store
+._*
+
+# Exclude temp nibs and swap files
+*~.nib
+*.swp
+
+# backup files
+*~
+
+# IntelliJ
+*.iml
+*.ipr
+*.iws
+.idea
+
+#build files
+BUILD_DATE
+build/
+.gradle
+target/
+
+*.log
+logfile
