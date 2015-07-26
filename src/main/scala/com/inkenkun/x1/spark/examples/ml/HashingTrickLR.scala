@@ -26,18 +26,23 @@ object HashingTrickLR {
     import sqlContext.implicits._
 
 
-    val trainCSV = args(0)
-    val testCSV  = args(1)
+    val csv = args(0)
 
+
+    /** ---------------------------------------------------------------------------------------------------------*/
+    // CSV(訓練データ)の読み込み
+    val rawCsv = sqlContext.read.format( "com.databricks.spark.csv" ).option( "header", "false" ).load( csv )
+
+
+    /** ---------------------------------------------------------------------------------------------------------*/
     // UDF(=UserDefinedFunction)の定義
     val f    = udf { (v:String, prefix:Int ) => s"$prefix:$v" }
     val hour = udf { (v:String ) => v slice( 6, 8 ) }
 
+
     /** ---------------------------------------------------------------------------------------------------------*/
     // 訓練データの準備
-    val trainRaw = sqlContext.read.format( "com.databricks.spark.csv" ).option( "header", "false" ).load( trainCSV )
-
-    val train = trainRaw.select(
+    val data = rawCsv.select(
       $"C0" as "id",
       $"C1".cast( DoubleType ).as( "label" ),
       array(
@@ -52,14 +57,18 @@ object HashingTrickLR {
         f( $"C14", lit(14) )
       ).as( "text" )
     )
-    val splits = train.randomSplit( Array(0.7, 0.3) )
-    val ( trainingData, testData ) = ( splits(0), splits(1) )
+
+
+    /** ---------------------------------------------------------------------------------------------------------*/
+    // 訓練データと検証データにわける
+    val splits = data.randomSplit( Array(0.7, 0.3) )
+    val ( train, test ) = ( splits(0), splits(1) )
 
 
     /** ---------------------------------------------------------------------------------------------------------*/
     // HashingTrickで次元削減
     val hashingTF = new HashingTF().setNumFeatures( 1000 ).setInputCol( "text" ).setOutputCol( "features" )
-    // ロジスティック回帰で確立を予測
+    // ロジスティック回帰でクリック確率を予測
     val lr = new LogisticRegression().setMaxIter( 10 ).setRegParam( 0.1 )
 
     /** 学習 */
@@ -68,7 +77,7 @@ object HashingTrickLR {
 
 
     // スキーマ
-    model.transform( testData ).select("*").schema.printTreeString
+    model.transform( test ).select("*").schema.printTreeString
 
 
     /** ---------------------------------------------------------------------------------------------------------*/
@@ -82,7 +91,7 @@ object HashingTrickLR {
     }
 
     // スコア<=0.5の場合prediction=0.0と推定している
-    model.transform( testData ).select(
+    model.transform( test ).select(
       $"label",
       $"prediction",
       v0( $"probability" ).as( "probability0" ),
@@ -104,7 +113,7 @@ object HashingTrickLR {
      */
 
     // スコア>0.5の場合prediction=1.0と推定している
-    model.transform( testData ).select(
+    model.transform( test ).select(
       $"label",
       $"prediction",
       v0( $"probability" ).as( "probability0" ),
@@ -125,7 +134,7 @@ object HashingTrickLR {
       label:0.0, predict:1.0, v(0):0.5253865685466333, v(1):0.4746134314533666
      */
 
-    model.transform( testData ).select(
+    model.transform( test ).select(
       $"text",
       v0( $"probability" ).as( "probability0" ),
       v1( $"probability" ).as( "probability1" )
@@ -146,7 +155,7 @@ object HashingTrickLR {
 
     /** ---------------------------------------------------------------------------------------------------------*/
     // ROC curve
-    val tested = model.transform( testData ).select(
+    val tested = model.transform( test ).select(
       v0( $"probability" ),
       $"label"
     )
@@ -179,34 +188,13 @@ object HashingTrickLR {
     crossval.setNumFolds( 3 ) // Use 3+ in practice
 
     // Run cross-validation, and choose the best set of parameters.
-    val cvModel = crossval.fit( train )
+    val cvModel = crossval.fit( data )
     val parent = cvModel.bestModel.parent.asInstanceOf[Pipeline]
     val bestHT = parent.getStages(0).asInstanceOf[HashingTF]
     val bestLR = parent.getStages(1).asInstanceOf[LogisticRegression]
     println(s"numFeatures: ${bestHT.getNumFeatures}")
     println(s"regParam: ${bestLR.getRegParam}")
     println(s"maxIter: ${bestLR.getMaxIter}")
-
-
-
-    /** ---------------------------------------------------------------------------------------------------------*/
-    // テストデータの準備
-    val testRaw = sqlContext.read.format( "com.databricks.spark.csv" ).option( "header", "false" ).load( testCSV )
-
-    val test = trainRaw.select(
-      $"C0" as "id",
-      array(
-        f( hour( $"C1" ), lit(2) ),
-        f( $"C3",  lit(4) ),
-        f( $"C4",  lit(5) ),
-        f( $"C5",  lit(6) ),
-        f( $"C6",  lit(7) ),
-        f( $"C8",  lit(8) ),
-        f( $"C9",  lit(10) ),
-        f( $"C12", lit(13) ),
-        f( $"C13", lit(14) )
-      ).as( "text" )
-    )
 
 
     sc.stop()
